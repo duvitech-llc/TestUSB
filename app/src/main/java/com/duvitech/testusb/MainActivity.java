@@ -18,6 +18,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -44,8 +45,9 @@ public class MainActivity extends AppCompatActivity {
     private UsbDeviceConnection connection;
     private UsbInterface mInterface;
     private UsbEndpoint outEndpoint;
-    private int MAX_PACKET_SIZE = 128;
+    private int MAX_PACKET_SIZE = 512;
 
+    private TextView txtLabel = null;
 
     // Used to load the 'native-lib' library on application startup.
     static {
@@ -64,7 +66,7 @@ public class MainActivity extends AppCompatActivity {
                     connection = usbManager.openDevice(device);
                     int vid = device.getVendorId();
                     int pid = device.getProductId();
-                    int iface = 3;
+                    int iface = 0;
                     Log.i(TAG, "Found " + device.getInterfaceCount() + " interfaces");
                     mInterface = device.getInterface(iface);
                     if(mInterface != null){
@@ -182,7 +184,8 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Example of a call to a native method
+        txtLabel = findViewById(R.id.txtLabel);
+
         Button btn = findViewById(R.id.btnStart);
         btn.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -191,16 +194,42 @@ public class MainActivity extends AppCompatActivity {
                 Log.d(TAG,"Start Button Click");
                 byte[] arr = new byte[640*480*2];
                 Arrays.fill(arr,(byte)0xFF);
+
+                final ByteBuffer buffer = ByteBuffer.wrap(arr);
+
+                int max_packet_size = outEndpoint.getMaxPacketSize();
+                Log.d(TAG, String.format("EP: %d Max Packet Size: %d", outEndpoint.getEndpointNumber(), max_packet_size));
+
+                byte[] tmp = new byte[max_packet_size];
+                int len = 0;
+
+                int frameSize = buffer.remaining();
+
                 // start timer
-                sent = connection.bulkTransfer(outEndpoint, arr, arr.length, 100);
+                long startTime = System.nanoTime();
+
+                while (buffer.hasRemaining()) {
+                    if (buffer.remaining() > max_packet_size) {
+                        len = max_packet_size;
+                    } else {
+                        len = buffer.remaining();
+                    }
+                    buffer.get(arr, 0, len);
+                    sent = connection.bulkTransfer(outEndpoint, tmp, len, 100);
+                    if (sent != len) {
+
+                        Log.e(TAG, "sent " + sent + " out of " + len);
+                        if(sent == -1){
+                            Log.e(TAG,"error");
+                        }
+                    }
+                }
 
                 // end timer
+                startTime = System.nanoTime() - startTime;
+                txtLabel.setText(String.format("sendRawBuffer Frame Time: %.2f ms Size %d bytes", (float)startTime/1000000, frameSize));
+                Log.d(TAG, String.format("sendRawBuffer Frame Time: %.2f ms Size %d bytes", (float)startTime/1000000, frameSize));
 
-                if(sent<0){
-                    Log.e(TAG,"error");
-                }else{
-                    Log.d(TAG, String.format("Sent %d bytes ", sent));
-                }
             }
         });
 
